@@ -1,0 +1,8 @@
+streamlit
+pandas
+plotly
+statmodels.api
+statmodels.formula.api
+panelOLS
+randomEffects
+compare
