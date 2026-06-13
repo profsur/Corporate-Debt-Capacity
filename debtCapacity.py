@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import time
 
 # ==========================================
 # 1. PAGE CONFIGURATION & HEADER
@@ -59,7 +60,8 @@ analysis_type = st.sidebar.radio(
         "CFO Predictive Benchmark",
         "Credit Risk Screener (EWS)",
         "Econometric Research Engine",
-        "Automated White Paper"
+        "Automated White Paper",
+        "AI Research Assistant (RAG)"
     )
 )
 
@@ -415,7 +417,7 @@ elif analysis_type == "Econometric Research Engine":
                 st.table(ar_results.style.format({'Coefficient': '{:.4f}', 'P-Value': '{:.4f}'}))
 
 # ==========================================
-# VIEW 7: AUTOMATED WHITE PAPER (PPT ENHANCED)
+# VIEW 7: AUTOMATED WHITE PAPER
 # ==========================================
 elif analysis_type == "Automated White Paper":
     
@@ -579,3 +581,122 @@ elif analysis_type == "Automated White Paper":
 
             st.divider()
             st.caption("🖨️ **Export Instructions:** This expanded comprehensive white paper has been dynamically generated based on your dataset selection. To export, press `Ctrl + P` (or `Cmd + P`) and select 'Save as PDF'.")
+
+# ==========================================
+# VIEW 8: AI RESEARCH ASSISTANT (RAG)
+# ==========================================
+elif analysis_type == "AI Research Assistant (RAG)":
+    st.header("🤖 AI Literature & Methodology Assistant")
+    st.write("Ask theoretical questions or query methodological choices. The AI retrieves answers directly from the curated literature.")
+
+    # --- 1. SIMULATED VECTOR DATABASE ---
+    vector_db = {
+        "pecking order": {
+            "text": "Firms prefer internal finance. They adapt their target dividend payout ratios to their investment opportunities. If external finance is required, firms issue the safest security first. That is, they start with debt, then possibly hybrid securities, and equity only as a last resort.",
+            "citation": "Myers, S. C., & Majluf, N. S. (1984)"
+        },
+        "life stage": {
+            "text": "A firm's life cycle stage can be captured by the algebraic signs of its operating, investing, and financing cash flows. For example, a 'Maturity' firm exhibits positive operating cash flows, negative investing cash flows, and negative financing cash flows as it repays debt and distributes dividends.",
+            "citation": "Dickinson, V. (2011)"
+        },
+        "decline vs decay": {
+            "text": "Distress can be bifurcated into 'Decline' and 'Decay'. Decline firms exhibit positive financing cash flow, seeking external capital to orchestrate a turnaround. Decay firms exhibit negative financing cash flows, liquidating assets to repay trapped creditors, signaling an irreversible wind-down.",
+            "citation": "Application Conceptual Framework (2026)"
+        },
+        "dynamic panel": {
+            "text": "In panel data with a short time dimension (T) and large N, standard fixed effects models with a lagged dependent variable suffer from Nickell bias. GMM estimators are preferred. However, as T approaches infinity (e.g., T > 20), this bias diminishes and fixed effects become consistent while avoiding instrument proliferation.",
+            "citation": "Arellano, M., & Bond, S. (1991) / Judson & Owen (1999)"
+        },
+        "zombie": {
+            "text": "A structural rise in unprofitable firms kept alive by cheap credit and debt rollovers. These 'Zombie Firms' depress aggregate economic productivity by trapping capital that should be allocated to growing enterprises.",
+            "citation": "Banerjee, R., & Hofmann, B. (2018)"
+        }
+    }
+
+    # --- 2. STREAMLIT CHAT UI INITIALIZATION ---
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {"role": "assistant", "content": "Hello! I am your AI Literature Assistant. You can click a suggested question below, or type your own specific query in the chat box."}
+        ]
+
+    # Display chat messages from history on app rerun
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # --- 3. PRE-DEFINED QUESTIONS (SUGGESTED PROMPTS) ---
+    st.write("") 
+    st.caption("💡 **Suggested Research Queries:**")
+    col1, col2, col3 = st.columns(3)
+
+    active_prompt = None
+
+    if col1.button("What is the pecking order theory?", use_container_width=True):
+        active_prompt = "What is the pecking order theory?"
+    if col2.button("Difference between Decline and Decay?", use_container_width=True):
+        active_prompt = "What is the difference between Decline and Decay?"
+    if col3.button("Why use dynamic panels instead of GMM?", use_container_width=True):
+        active_prompt = "Why use dynamic panels instead of GMM?"
+
+    # --- 4. CUSTOM CHAT INPUT ---
+    user_input = st.chat_input("Or type your own theoretical question here...")
+    if user_input:
+        active_prompt = user_input
+
+    # --- 5. THE RAG RETRIEVAL & GENERATION LOGIC ---
+    if active_prompt:
+        
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": active_prompt})
+        
+        # Display user message
+        with st.chat_message("user"):
+            st.markdown(active_prompt)
+
+        # Display assistant response
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            
+            with st.spinner("Searching curated literature database..."):
+                time.sleep(1) 
+                
+                # Simulated Retrieval
+                retrieved_chunks = []
+                prompt_lower = active_prompt.lower()
+                
+                if "pecking order" in prompt_lower:
+                    retrieved_chunks.append(vector_db["pecking order"])
+                if "life stage" in prompt_lower or "stages" in prompt_lower:
+                    retrieved_chunks.append(vector_db["life stage"])
+                if "decline" in prompt_lower or "decay" in prompt_lower:
+                    retrieved_chunks.append(vector_db["decline vs decay"])
+                if "dynamic panel" in prompt_lower or "gmm" in prompt_lower:
+                    retrieved_chunks.append(vector_db["dynamic panel"])
+                if "zombie" in prompt_lower or "distress" in prompt_lower:
+                    retrieved_chunks.append(vector_db["zombie"])
+                
+                # Simulated Generation
+                if retrieved_chunks:
+                    response = "**Based on the retrieved literature:**\n\n"
+                    for chunk in retrieved_chunks:
+                        response += f"According to *{chunk['citation']}*: {chunk['text']}\n\n"
+                else:
+                    response = "I could not find any information regarding that in your curated literature database. Please try asking about 'pecking order', 'life stage', 'decline vs decay', or 'dynamic panels'."
+                
+                # Simulate the "typing" effect
+                full_response = ""
+                for chunk in response.split():
+                    full_response += chunk + " "
+                    time.sleep(0.05)
+                    message_placeholder.markdown(full_response + "▌")
+                
+                message_placeholder.markdown(full_response)
+                
+                # Show the exact source context
+                if retrieved_chunks:
+                    with st.expander("🔍 View Retrieved Source Documents"):
+                        for chunk in retrieved_chunks:
+                            st.info(f"**Source:** {chunk['citation']}\n\n**Exact Text:** {chunk['text']}")
+
+        # Add assistant response to chat history
+        st.session_state.messages.append({"role": "assistant", "content": full_response})
