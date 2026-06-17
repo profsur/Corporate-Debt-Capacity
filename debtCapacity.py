@@ -3,12 +3,33 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import time
+import os
+import warnings
+
+# Mute the LangChain Community sunset warning
+warnings.filterwarnings("ignore", message=".*langchain-community.*")
 
 # ==========================================
 # 1. PAGE CONFIGURATION & HEADER
 # ==========================================
 st.set_page_config(page_title="Life Stage Financial Leverage Strategist", layout="wide", page_icon="📊")
 st.title("Life Stage Financial Leverage Strategist")
+
+# --- Expanded 3-Paragraph Socio-Economic Lead Text ---
+st.markdown("""
+    <div style='font-size: 1.15rem; line-height: 1.7; border-left: 5px solid #1f77b4; padding: 20px; background-color: #f8faff; border-radius: 6px; margin-bottom: 25px; text-align: justify;'>
+        <p style='margin-top: 0; margin-bottom: 15px;'>
+            <strong>Global & Developed Economy Paradigms:</strong> In an increasingly interconnected and volatile global economy, a firm's capital structure functions as a primary driver of its macroeconomic resilience and competitive agility. While traditional corporate finance frameworks—pioneered in developed Western markets—largely treat capital structure as a static optimization problem balancing tax shields against bankruptcy overheads, modern market realities demand a more fluid perspective. In highly mature corporate ecosystems, capital structure decisions are intrinsically bound to secular shifts, supply chain reorganizations, and shifting monetary policies, proving that static debt-to-equity formulas fail to safeguard long-term shareholder value.
+        </p>
+        <p style='margin-bottom: 15px;'>
+            <strong>The Asian Corporate Landscape:</strong> Translating these theories into the dynamic Asian business context reveals a unique matrix of institutional constraints and corporate behaviors. Across emerging Asian economies, corporations face distinct capital allocation challenges, characterized by localized credit friction, concentrated ownership structures, and a historical reliance on relationship-based banking systems. In these environments, business growth and entrepreneurial survival are fundamentally dictated by a firm's operational cash flow volatility, turning capital structure management into an active, strategic defense mechanism rather than a passive accounting exercise.
+        </p>
+        <p style='margin-bottom: 0;'>
+            <strong>The Indian Scenario & The IBC Framework:</strong> Within this regional context, the Indian corporate ecosystem stands out as a highly compelling testing ground for financial theory. The formal operationalization of rigorous regulatory frameworks, most notably the Insolvency and Bankruptcy Code (IBC), has fundamentally transformed the default landscape and rewritten the rules of corporate risk-taking in India. By disaggregating capital structure dynamics into sequential corporate life stages, this research engine bridges the gap between traditional accounting abstractions and the real-world operational strains of Indian enterprises, providing a systemic toolkit for corporate survival and credit risk forecasting.
+        </p>
+    </div>
+""", unsafe_allow_html=True)
+st.divider()
 
 # ==========================================
 # 2. SIDEBAR NAVIGATION & CONFIGURATION
@@ -74,7 +95,7 @@ st.sidebar.info(f"**Active Dataset:**\n{selected_file}\n\n**Active Stage Model:*
 @st.cache_data
 def load_data(file_name, stage_col_name):
     df = pd.read_stata(file_name)
-    df = df.copy()
+    df = df.copy() # FIX: De-fragment the massive Stata dataframe
     
     # Fallback safety check: If user selects the new definition but an old dataset
     if stage_col_name not in df.columns:
@@ -365,56 +386,69 @@ elif analysis_type == "Econometric Research Engine":
             run_ar_test = col_btn3.button("Run AR(1) & AR(2) Diagnostics")
             
             if run_fe:
-                df_dyn = df_reg.dropna(subset=['L_leverage']).copy()
-                exog_vars_dyn = ['L_leverage', 'prof', 'tang', 'dvnd', 'taxShield', 'GFC', 'ibc2016', 'dcovid20less', 'interest', 'returnIndexClosing']
-                exog_dyn = sm.add_constant(df_dyn[exog_vars_dyn])
-                stage_dummies_dyn = pd.get_dummies(df_dyn['active_stage'], drop_first=True, dtype=float)
-                exog_dyn = pd.concat([exog_dyn, stage_dummies_dyn], axis=1)
-                df_dyn_panel = df_dyn.set_index(['companyname', 'year'])
-                dyn_res = PanelOLS(df_dyn_panel['leverage'], exog_dyn, entity_effects=True, time_effects=False, drop_absorbed=True).fit(cov_type='clustered', cluster_entity=True)
-                st.markdown("### Dynamic Fixed Effects Results")
-                st.markdown(dyn_res.summary.as_html(), unsafe_allow_html=True)
+                try:
+                    df_dyn = df_reg.dropna(subset=['L_leverage']).copy()
+                    exog_vars_dyn = ['L_leverage', 'prof', 'tang', 'dvnd', 'taxShield', 'GFC', 'ibc2016', 'dcovid20less', 'interest', 'returnIndexClosing']
+                    exog_dyn = sm.add_constant(df_dyn[exog_vars_dyn])
+                    stage_dummies_dyn = pd.get_dummies(df_dyn['active_stage'], drop_first=True, dtype=float)
+                    exog_dyn = pd.concat([exog_dyn, stage_dummies_dyn], axis=1)
+                    df_dyn_panel = df_dyn.set_index(['companyname', 'year'])
+                    
+                    dyn_res = PanelOLS(df_dyn_panel['leverage'], exog_dyn, entity_effects=True, time_effects=False, drop_absorbed=True).fit(cov_type='robust')
+                    st.markdown("### Dynamic Fixed Effects Results")
+                    st.markdown(dyn_res.summary.as_html(), unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Dynamic FE Calculation Failed: {e}")
 
             if run_gmm:
                 try:
-                    from linearmodels.iv import IVGMM
-                except ImportError:
-                    st.error("Missing linearmodels.iv")
-                    st.stop()
-                df_gmm = df_reg.copy()
-                df_gmm['L2_leverage'] = df_gmm.groupby('companyname')['leverage'].shift(2)
-                df_gmm = df_gmm.dropna(subset=['L_leverage', 'L2_leverage']).copy()
-                exog_iv = ['prof', 'tang', 'dvnd', 'taxShield', 'GFC', 'ibc2016', 'dcovid20less', 'interest', 'returnIndexClosing']
-                exog_df = sm.add_constant(df_gmm[exog_iv])
-                stage_dummies_gmm = pd.get_dummies(df_gmm['active_stage'], drop_first=True, dtype=float)
-                exog_df = pd.concat([exog_df, stage_dummies_gmm], axis=1)
-                endog_df = df_gmm[['L_leverage']]
-                instr_df = df_gmm[['L2_leverage']]
-                dep_df = df_gmm[['leverage']]
-                gmm_res = IVGMM(dependent=dep_df, exog=exog_df, endog=endog_df, instruments=instr_df).fit(cov_type='clustered', clusters=df_gmm['companyname'])
-                st.markdown("### Instrumental Variable GMM")
-                st.markdown(gmm_res.summary.as_html(), unsafe_allow_html=True)
+                    try:
+                        from linearmodels.iv import IVGMM
+                    except ImportError:
+                        st.error("Missing linearmodels.iv")
+                        st.stop()
+                    df_gmm = df_reg.copy()
+                    df_gmm['L2_leverage'] = df_gmm.groupby('companyname')['leverage'].shift(2)
+                    df_gmm = df_gmm.dropna(subset=['L_leverage', 'L2_leverage']).copy()
+                    exog_iv = ['prof', 'tang', 'dvnd', 'taxShield', 'GFC', 'ibc2016', 'dcovid20less', 'interest', 'returnIndexClosing']
+                    exog_df = sm.add_constant(df_gmm[exog_iv])
+                    stage_dummies_gmm = pd.get_dummies(df_gmm['active_stage'], drop_first=True, dtype=float)
+                    exog_df = pd.concat([exog_df, stage_dummies_gmm], axis=1)
+                    endog_df = df_gmm[['L_leverage']]
+                    instr_df = df_gmm[['L2_leverage']]
+                    dep_df = df_gmm[['leverage']]
+                    gmm_res = IVGMM(dependent=dep_df, exog=exog_df, endog=endog_df, instruments=instr_df).fit(cov_type='clustered', clusters=df_gmm['companyname'])
+                    st.markdown("### Instrumental Variable GMM")
+                    st.markdown(gmm_res.summary.as_html(), unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"IV-GMM Calculation Failed: {e}")
 
             if run_ar_test:
-                df_dyn = df_reg.dropna(subset=['L_leverage']).copy()
-                exog_vars_dyn = ['L_leverage', 'prof', 'tang', 'dvnd', 'taxShield', 'GFC', 'ibc2016', 'dcovid20less', 'interest', 'returnIndexClosing']
-                exog_dyn = sm.add_constant(df_dyn[exog_vars_dyn])
-                stage_dummies_dyn = pd.get_dummies(df_dyn['active_stage'], drop_first=True, dtype=float)
-                exog_dyn = pd.concat([exog_dyn, stage_dummies_dyn], axis=1)
-                df_dyn_panel = df_dyn.set_index(['companyname', 'year'])
-                dyn_res = PanelOLS(df_dyn_panel['leverage'], exog_dyn, entity_effects=True, time_effects=False, drop_absorbed=True).fit(cov_type='clustered', cluster_entity=True)
-                resid_df = pd.DataFrame({'resid': dyn_res.resids})
-                resid_df['L1_resid'] = resid_df.groupby(level='companyname')['resid'].shift(1)
-                resid_df['L2_resid'] = resid_df.groupby(level='companyname')['resid'].shift(2)
-                resid_test_df = resid_df.dropna()
-                ar1_model = smf.ols('resid ~ L1_resid', data=resid_test_df).fit(cov_type='HC1')
-                ar2_model = smf.ols('resid ~ L2_resid', data=resid_test_df).fit(cov_type='HC1')
-                ar_results = pd.DataFrame({
-                    'Test': ['AR(1) Test (Lag 1)', 'AR(2) Test (Lag 2)'],
-                    'Coefficient': [ar1_model.params['L1_resid'], ar2_model.params['L2_resid']],
-                    'P-Value': [ar1_model.pvalues['L1_resid'], ar2_model.pvalues['L2_resid']]
-                })
-                st.table(ar_results.style.format({'Coefficient': '{:.4f}', 'P-Value': '{:.4f}'}))
+                try:
+                    df_dyn = df_reg.dropna(subset=['L_leverage']).copy()
+                    exog_vars_dyn = ['L_leverage', 'prof', 'tang', 'dvnd', 'taxShield', 'GFC', 'ibc2016', 'dcovid20less', 'interest', 'returnIndexClosing']
+                    exog_dyn = sm.add_constant(df_dyn[exog_vars_dyn])
+                    stage_dummies_dyn = pd.get_dummies(df_dyn['active_stage'], drop_first=True, dtype=float)
+                    exog_dyn = pd.concat([exog_dyn, stage_dummies_dyn], axis=1)
+                    df_dyn_panel = df_dyn.set_index(['companyname', 'year'])
+                    dyn_res = PanelOLS(df_dyn_panel['leverage'], exog_dyn, entity_effects=True, time_effects=False, drop_absorbed=True).fit(cov_type='robust')
+                    
+                    resid_df = pd.DataFrame({'resid': dyn_res.resids})
+                    resid_df['L1_resid'] = resid_df.groupby(level='companyname')['resid'].shift(1)
+                    resid_df['L2_resid'] = resid_df.groupby(level='companyname')['resid'].shift(2)
+                    
+                    resid_test_df = resid_df.dropna().reset_index()
+                    
+                    ar1_model = smf.ols('resid ~ L1_resid', data=resid_test_df).fit(cov_type='HC1')
+                    ar2_model = smf.ols('resid ~ L2_resid', data=resid_test_df).fit(cov_type='HC1')
+                    ar_results = pd.DataFrame({
+                        'Test': ['AR(1) Test (Lag 1)', 'AR(2) Test (Lag 2)'],
+                        'Coefficient': [ar1_model.params['L1_resid'], ar2_model.params['L2_resid']],
+                        'P-Value': [ar1_model.pvalues['L1_resid'], ar2_model.pvalues['L2_resid']]
+                    })
+                    st.table(ar_results.style.format({'Coefficient': '{:.4f}', 'P-Value': '{:.4f}'}))
+                except Exception as e:
+                    st.error(f"AR Diagnostics Failed: {e}")
 
 # ==========================================
 # VIEW 7: AUTOMATED WHITE PAPER
@@ -443,7 +477,6 @@ elif analysis_type == "Automated White Paper":
                 st.error("Missing `statsmodels`. Please install to generate the full white paper.")
                 st.stop()
 
-            # --- Background Data Crunching ---
             total_obs = len(data)
             unique_firms = data['companyname'].nunique() if 'companyname' in data.columns else "N/A"
             start_year = int(data['year'].min())
@@ -496,16 +529,12 @@ elif analysis_type == "Automated White Paper":
             stage_cols = [c for c in q50.params.index if 'active_stage' in c]
             clean_labels = [c.replace("C(active_stage)[T.", "").replace("]", "") for c in stage_cols]
 
-            # ==========================================
-            # RENDER EXPANDED REPORT
-            # ==========================================
             st.divider()
             st.markdown(f"<div class='wp-h1'>Financial Leverage Decisions: Responsible Finance during Distress</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='wp-h2'>Empirical Evidence from Top Indian Non-Financial Firms ({start_year} - {end_year})</div>", unsafe_allow_html=True)
             st.markdown(f"<p style='text-align: center;'><em>Active Classification Matrix: {target_stage_col} | N = {total_obs:,}</em></p>", unsafe_allow_html=True)
             st.markdown("<br><br><br>", unsafe_allow_html=True)
             
-            # --- CHAPTER 1 ---
             st.markdown("<div class='wp-h3'>Chapter 1: Executive Summary & Abstract</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='wp-text'>This comprehensive white paper synthesizes an exhaustive empirical analysis of the determinants of capital structure among non-financial firms listed in the S&P BSE 500 index. Spanning an extensive {panel_length}-year longitudinal timeline from {start_year} to {end_year}, the dataset under examination encompasses **{total_obs:,} firm-year observations** derived from **{unique_firms} unique corporate entities**. </div>", unsafe_allow_html=True)
             st.markdown(f"<div class='wp-text'>Moving decisively beyond conventional, static industry-average analyses, this paper pioneers the operationalization of cash flow-based life stage methodologies. By categorizing firms based on the net combinations of their operating, investing, and financing cash flows, we establish that optimal financial leverage is a dynamic target. Furthermore, utilizing advanced econometrics including Dynamic Fixed Effects (FE) panel models and Quantile Regression, this paper establishes mathematically rigorous predictive benchmarks and systemic Early Warning Systems (EWS) for credit risk, with a distinct focus on survival and revival strategies for distressed firms.</div>", unsafe_allow_html=True)
@@ -515,18 +544,15 @@ elif analysis_type == "Automated White Paper":
             else:
                 st.markdown("<div class='wp-quote'><strong>Primary Academic Contribution:</strong> This research fundamentally extends the Pecking Order and Trade-Off theories. By utilizing Quantile Regression, this paper mathematically proves that the penalizing effects of negative profitability and operational decline are highly asymmetric, exacerbating tail-risk. It critically distinguishes between 'Decline' and 'Decay' phenomena within the Indian macroeconomic context.</div>", unsafe_allow_html=True)
 
-            # --- CHAPTER 2 ---
             st.markdown("<div class='wp-h3'>Chapter 2: Theoretical Framework & Literature Context</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'>Historically, capital structure theory has been dominated by the <strong>Trade-Off Theory</strong> (balancing tax shields against bankruptcy costs) and the <strong>Pecking Order Theory</strong> (preferring internal financing over debt due to information asymmetry). However, both theories traditionally assume firm homogeneity over time. A firm's capacity to absorb debt and its ability to generate internal funds are not static; they change radically as the underlying business matures amidst intensifying global competition.</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'>To bridge this gap, this research introduces a vital third dimension: <strong>The Corporate Life Stage</strong>. By mapping the algebraic signs (+/-) of a firm's Operating, Investing, and Financing cash flows, we classify firms into dynamic stages. This paper hypothesizes that a firm's optimal capital structure is inextricably tethered to its current placement within this framework, shifting the perspective of finance from mere accounting to an active survival tool.</div>", unsafe_allow_html=True)
 
-            # --- CHAPTER 3 ---
             st.markdown("<div class='wp-h3'>Chapter 3: The Mechanics of Distress — Decline vs. Decay</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'>A cornerstone of this research is the critical disaggregation of financial distress into two distinct phases: <strong>Decline</strong> and <strong>Decay</strong>. While often conflated in traditional literature, their risk profiles and financial behaviors are entirely divergent.</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'><strong>The Decline Phase:</strong> Firms in the Decline stage typically exhibit insufficient operational cash flows as product viability wanes. Crucially, however, they display a <em>positive</em> financing cash flow. This indicates that the firm still possesses market credibility and is actively seeking external capital to orchestrate a turnaround or pivot strategy. Because they are investing in recovery, firms in early Decline exhibit a tangibly higher probability of survival.</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'><strong>The Decay Phase:</strong> Conversely, Decay represents a structural point of no return. Firms in Decay exhibit <em>negative</em> financing cash flows coupled with net asset sales. This signature indicates that the firm is actively being wound down; it is liquidating assets not to reinvest, but merely to repay outstanding liabilities to trapped creditors. The probability of survival drops precipitously as the firm inches toward formal bankruptcy procedures.</div>", unsafe_allow_html=True)
 
-            # --- CHAPTER 4 ---
             st.markdown("<div class='wp-h3'>Chapter 4: Macroeconomic Dynamics & Secular Deleveraging</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='wp-text'>The overarching narrative of the Indian corporate sector from {start_year} to {end_year} is one of structural deleveraging, falling from <strong>{start_lev:.1f}%</strong> to <strong>{end_lev:.1f}%</strong>. Yet, this masks immense cyclical volatility. As Figure 1 demonstrates, corporate leverage spiked to <strong>{peak_lev:.1f}% in {peak_year}</strong>, reflecting aggressive debt-fueled capital expenditure cycles. Conversely, rigorous deleveraging mandates (e.g., the Insolvency and Bankruptcy Code of 2016) fundamentally altered the consequence of default in India, driving the market to a trough of <strong>{trough_lev:.1f}% in {trough_year}</strong>.</div>", unsafe_allow_html=True)
             
@@ -536,7 +562,6 @@ elif analysis_type == "Automated White Paper":
             fig1.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20), plot_bgcolor='rgba(240,240,240,0.5)')
             st.plotly_chart(fig1, width='stretch')
 
-            # --- CHAPTER 5 ---
             st.markdown("<div class='wp-h3'>Chapter 5: The Empirical U-Shaped Leverage Curve</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='wp-text'>Disaggregating the data by life stage validates the U-shaped leverage curve. Highly capital-intensive <strong>Startup</strong> and <strong>Growth</strong> firms rely heavily on external financing (averaging <strong>{startup_lev:.1f}%</strong> and <strong>{growth_lev:.1f}%</strong> respectively). As firms reach <strong>Maturity</strong>, they utilize stable internal accruals to systematically retire debt, dragging average leverage down to <strong>{maturity_lev:.1f}%</strong> in strict adherence to the Pecking Order Theory.</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='wp-text'>However, as firms enter the <strong>Decline</strong> stage, operating cash flows evaporate, and accumulated losses erode the equity base, causing leverage to structurally spike back up to <strong>{decline_lev:.1f}%</strong>. For firms that fail to execute a turnaround and cascade into <strong>Decay</strong>, the forced liquidation of assets to repay creditors is reflected in a shifting leverage dynamic (averaging <strong>{decay_lev:.1f}%</strong>).</div>", unsafe_allow_html=True)
@@ -546,12 +571,10 @@ elif analysis_type == "Automated White Paper":
             fig2.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20), showlegend=False, plot_bgcolor='rgba(240,240,240,0.5)')
             st.plotly_chart(fig2, width='stretch')
 
-            # --- CHAPTER 6 ---
             st.markdown("<div class='wp-h3'>Chapter 6: Econometric Methodology & The Dynamic Panel Defense</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'>Baseline Pooled OLS confirms foundational theories: Operating Profitability exhibits a highly significant negative coefficient (<strong>" + str(round(prof_coef, 2)) + "</strong>), while Asset Tangibility yields a positive coefficient (<strong>" + str(round(tang_coef, 2)) + "</strong>). To account for capital structure adjustment costs, a dynamic panel model incorporating a lagged dependent variable ($L.leverage$) is strictly necessary.</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='wp-text'>While Generalized Method of Moments (System GMM) is common, it suffers from fatal 'instrument proliferation' in long panels. Because this dataset spans an extended panel of <strong>$T = {panel_length}$ years</strong>, the Nickell bias mathematically converges toward zero. Deploying a <strong>Dynamic Fixed Effects (FE) model</strong> is statistically robust, stripping out unobserved firm-level heterogeneity without artificially overfitting endogenous variables.</div>", unsafe_allow_html=True)
 
-            # --- CHAPTER 7 ---
             st.markdown("<div class='wp-h3'>Chapter 7: Asymmetric Risk & Quantile Margin Analysis</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'>Utilizing <strong>Quantile Regression (50th vs 90th percentiles)</strong>, this paper proves that structural credit risk is highly asymmetric. Figure 3 illustrates this clarity. If a healthy, median-levered firm (Blue Bar) enters the 'Decline' stage, its leverage barely shifts due to robust equity buffers. However, if a heavily indebted firm at the 90th percentile (Red Bar) enters 'Decline', it experiences a massive, uncontrollable marginal spike in leverage. Credit risk compounds exponentially at the tail.</div>", unsafe_allow_html=True)
             
@@ -561,21 +584,18 @@ elif analysis_type == "Automated White Paper":
             fig3.update_layout(title='Figure 3: The Asymmetric Marginal Increase in Leverage (Baseline = Maturity)', barmode='group', height=450, plot_bgcolor='rgba(240,240,240,0.5)', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig3, width='stretch')
 
-            # --- CHAPTER 8 ---
             st.markdown("<div class='wp-h3'>Chapter 8: The Tail-Risk — Zombie Firms & Extreme Leverage</div>", unsafe_allow_html=True)
             st.markdown(f"<div class='wp-text'>Standard averages obscure the extremities of financial distress. Within the {data_source_label} dataset, <strong>{ext_count} observations</strong> recorded book leverage exceeding 100%—indicating negative equity. Unlike healthy participants operating with <strong>{norm_prof:.1f}%</strong> profitability, these extreme outliers bleed capital at <strong>{ext_prof:.1f}%</strong>. Fascinatingly, the most common life stage for these distressed entities is <strong>{top_ext_stage}</strong>. This empirically validates the 'Zombie Firm' phenomenon, where structurally declining entities are kept artificially alive on life support via continuous debt rollovers from trapped creditors.</div>", unsafe_allow_html=True)
 
-            # --- CHAPTER 9 ---
             st.markdown("<div class='wp-h3'>Chapter 9: Systemic Risk & Responsible Finance</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'>The ultimate utility of this research lies in its predictive capacity. By mapping the 90th percentile of the leverage distribution, this model establishes a definitive 'Distress Ceiling'. When a firm breaches this bespoke, stage-adjusted ceiling, its probability of default accelerates exponentially. This necessitates a framework of <strong>Responsible Finance</strong>—timely interventions and customized financial tools tailored by life stage. Asset-backed lending and tax shields, for example, become highly relevant in later stages.</div>", unsafe_allow_html=True)
             
             wp_err_msg = f"🚨 **EWS LIVE MARKET SCAN ({end_year}):** Scanning {len(latest_year_data)} active firms reveals that **{flagged_count} entities** are operating with leverage ratios critically exceeding their Distress Ceilings. These firms require immediate deleveraging interventions."
             st.error(wp_err_msg)
 
-            # --- CHAPTER 10 ---
             st.markdown("<div class='wp-h3'>Chapter 10: Conclusion & Actionable Takeaways</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'>This research fundamentally disrupts the assumption that capital structure optimization is a static exercise. Financing decisions are organically tethered to the operational lifecycle.</div>", unsafe_allow_html=True)
-            st.markdown("<div class='wp-text'><strong>1. Timely Intervention Boosts Revival Odds:</strong> Firms in initial Decline have tangibly higher chances of recovery if proactive financing and divestment choices are made early.</div>", unsafe_allow_html=True)
+            st.markdown("<div class='wp-text'><strong>1. Timely Intervention Boosts Revival Odds:</strong> Firms in initial Decline have tangibly higher chances of recovery if proactive financing and investment/divestment choices are made early.</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'><strong>2. Tailored Strategies for Distress:</strong> Decline and Decay require fundamentally unique financial approaches. A strategy built for Decline will fail in Decay.</div>", unsafe_allow_html=True)
             st.markdown("<div class='wp-text'><strong>3. The Macro-Policy Imperative:</strong> The persistence of Zombie Firms highlights the absolute necessity for the unhindered application of bankruptcy frameworks. Capital trapped in decaying firms stifles macroeconomic growth; it must be efficiently liquidated and reallocated.</div>", unsafe_allow_html=True)
 
@@ -583,120 +603,187 @@ elif analysis_type == "Automated White Paper":
             st.caption("🖨️ **Export Instructions:** This expanded comprehensive white paper has been dynamically generated based on your dataset selection. To export, press `Ctrl + P` (or `Cmd + P`) and select 'Save as PDF'.")
 
 # ==========================================
-# VIEW 8: AI RESEARCH ASSISTANT (RAG)
+# VIEW 8: AI RESEARCH ASSISTANT (REAL RAG - GEMINI) - LCEL COMPLIANT
 # ==========================================
 elif analysis_type == "AI Research Assistant (RAG)":
     st.header("🤖 AI Literature & Methodology Assistant")
-    st.write("Ask theoretical questions or query methodological choices. The AI retrieves answers directly from the curated literature.")
+    st.write("Ask theoretical questions. The AI retrieves perfectly cited answers directly from the PDFs in your `literature_pdfs/` folder.")
 
-    # --- 1. SIMULATED VECTOR DATABASE ---
-    vector_db = {
-        "pecking order": {
-            "text": "Firms prefer internal finance. They adapt their target dividend payout ratios to their investment opportunities. If external finance is required, firms issue the safest security first. That is, they start with debt, then possibly hybrid securities, and equity only as a last resort.",
-            "citation": "Myers, S. C., & Majluf, N. S. (1984)"
-        },
-        "life stage": {
-            "text": "A firm's life cycle stage can be captured by the algebraic signs of its operating, investing, and financing cash flows. For example, a 'Maturity' firm exhibits positive operating cash flows, negative investing cash flows, and negative financing cash flows as it repays debt and distributes dividends.",
-            "citation": "Dickinson, V. (2011)"
-        },
-        "decline vs decay": {
-            "text": "Distress can be bifurcated into 'Decline' and 'Decay'. Decline firms exhibit positive financing cash flow, seeking external capital to orchestrate a turnaround. Decay firms exhibit negative financing cash flows, liquidating assets to repay trapped creditors, signaling an irreversible wind-down.",
-            "citation": "Application Conceptual Framework (2026)"
-        },
-        "dynamic panel": {
-            "text": "In panel data with a short time dimension (T) and large N, standard fixed effects models with a lagged dependent variable suffer from Nickell bias. GMM estimators are preferred. However, as T approaches infinity (e.g., T > 20), this bias diminishes and fixed effects become consistent while avoiding instrument proliferation.",
-            "citation": "Arellano, M., & Bond, S. (1991) / Judson & Owen (1999)"
-        },
-        "zombie": {
-            "text": "A structural rise in unprofitable firms kept alive by cheap credit and debt rollovers. These 'Zombie Firms' depress aggregate economic productivity by trapping capital that should be allocated to growing enterprises.",
-            "citation": "Banerjee, R., & Hofmann, B. (2018)"
-        }
-    }
+    # --- 1. API KEY INPUT & DATABASE CONTROLS ---
+    st.sidebar.divider()
+    st.sidebar.subheader("🔑 AI Configuration")
+    api_key = st.sidebar.text_input("Enter Google Gemini API Key:", type="password", help="Required to read PDFs and generate answers via Google Generative AI.")
+    
+    if st.sidebar.button("🔄 Reload Literature Database", help="Click this if you have added new PDFs to the folder."):
+        st.cache_resource.clear()
+        st.rerun()
 
-    # --- 2. STREAMLIT CHAT UI INITIALIZATION ---
-    if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {"role": "assistant", "content": "Hello! I am your AI Literature Assistant. You can click a suggested question below, or type your own specific query in the chat box."}
-        ]
+    if not api_key:
+        st.warning("⚠️ **Waiting for API Key:** Please enter your Google Gemini API key in the sidebar to initialize the AI Researcher.")
+    else:
+        # --- 2. INITIALIZE REAL RAG BACKEND (CACHED VIA LCEL) ---
+        @st.cache_resource(show_spinner=False)
+        def initialize_rag_system(key):
+            try:
+                os.environ["GOOGLE_API_KEY"] = key
+                from pypdf import PdfReader
+                from langchain_core.documents import Document
+                from langchain_text_splitters import RecursiveCharacterTextSplitter
+                from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+                from langchain_community.vectorstores import FAISS  
+                from langchain_core.prompts import ChatPromptTemplate
+                from langchain_core.runnables import RunnablePassthrough
+                from langchain_core.output_parsers import StrOutputParser
+                
+                # Check if folder exists
+                if not os.path.exists("literature_pdfs"):
+                    return None, "The folder `literature_pdfs/` does not exist. Please create it and add your PDFs."
+                
+                # Native Future-Proof PDF Loader
+                docs = []
+                directory = "literature_pdfs/"
+                for filename in os.listdir(directory):
+                    if filename.endswith(".pdf"):
+                        filepath = os.path.join(directory, filename)
+                        reader = PdfReader(filepath)
+                        text = ""
+                        for page in reader.pages:
+                            extracted = page.extract_text()
+                            if extracted:
+                                text += extracted + "\n"
+                        docs.append(Document(page_content=text, metadata={"source": filename}))
+                
+                if not docs:
+                    return None, "No PDFs found in the `literature_pdfs/` folder. Please add your academic papers."
+                
+                # Split text into searchable paragraphs
+                text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                splits = text_splitter.split_documents(docs)
+                
+                # Create the Vector Database using FAISS (Streamlit safe)
+                embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+                
+                # --- ANTI-CRASH BATCHING LOGIC ---
+                batch_size = 80 
+                vectorstore = FAISS.from_documents(documents=splits[:batch_size], embedding=embeddings)
+                
+                for i in range(batch_size, len(splits), batch_size):
+                    time.sleep(60) 
+                    batch = splits[i : i + batch_size]
+                    vectorstore.add_documents(batch)
+                
+                retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+                
+                # Create the LLM Model Brain
+                llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+                
+                # Setup Academic Prompt Engineering
+                system_prompt = (
+                    "You are an elite academic research assistant for a doctoral student in corporate finance.\n"
+                    "Use the following retrieved pieces of literature to comprehensively answer the question.\n"
+                    "If you don't know the answer based on the context, state that clearly.\n"
+                    "Always explicitly cite the authors and year (e.g., Dickinson, 2011) if the information is available in the context.\n\n"
+                    "Context: {context}\n\n"
+                    "Question: {input}\n\n"
+                    "Answer:"
+                )
+                prompt = ChatPromptTemplate.from_template(system_prompt)
+                
+                # Helper function to join retrieved source docs
+                def format_docs(docs):
+                    return "\n\n".join(doc.page_content for doc in docs)
+                
+                # Build LCEL chain
+                lcel_chain = (
+                    {"context": retriever | format_docs, "input": RunnablePassthrough()}
+                    | prompt
+                    | llm
+                    | StrOutputParser()
+                )
+                
+                return (lcel_chain, retriever), "Success"
+            except Exception as e:
+                return None, f"An error occurred during initialization: {e}"
 
-    # Display chat messages from history on app rerun
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # --- 3. PRE-DEFINED QUESTIONS (SUGGESTED PROMPTS) ---
-    st.write("") 
-    st.caption("💡 **Suggested Research Queries:**")
-    col1, col2, col3 = st.columns(3)
-
-    active_prompt = None
-
-    if col1.button("What is the pecking order theory?", use_container_width=True):
-        active_prompt = "What is the pecking order theory?"
-    if col2.button("Difference between Decline and Decay?", use_container_width=True):
-        active_prompt = "What is the difference between Decline and Decay?"
-    if col3.button("Why use dynamic panels instead of GMM?", use_container_width=True):
-        active_prompt = "Why use dynamic panels instead of GMM?"
-
-    # --- 4. CUSTOM CHAT INPUT ---
-    user_input = st.chat_input("Or type your own theoretical question here...")
-    if user_input:
-        active_prompt = user_input
-
-    # --- 5. THE RAG RETRIEVAL & GENERATION LOGIC ---
-    if active_prompt:
-        
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": active_prompt})
-        
-        # Display user message
-        with st.chat_message("user"):
-            st.markdown(active_prompt)
-
-        # Display assistant response
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
+        with st.spinner("Initializing Vector Database from `literature_pdfs/` (This only happens once, but may take a few minutes to respect rate limits)..."):
+            rag_output, status_msg = initialize_rag_system(api_key)
             
-            with st.spinner("Searching curated literature database..."):
-                time.sleep(1) 
-                
-                # Simulated Retrieval
-                retrieved_chunks = []
-                prompt_lower = active_prompt.lower()
-                
-                if "pecking order" in prompt_lower:
-                    retrieved_chunks.append(vector_db["pecking order"])
-                if "life stage" in prompt_lower or "stages" in prompt_lower:
-                    retrieved_chunks.append(vector_db["life stage"])
-                if "decline" in prompt_lower or "decay" in prompt_lower:
-                    retrieved_chunks.append(vector_db["decline vs decay"])
-                if "dynamic panel" in prompt_lower or "gmm" in prompt_lower:
-                    retrieved_chunks.append(vector_db["dynamic panel"])
-                if "zombie" in prompt_lower or "distress" in prompt_lower:
-                    retrieved_chunks.append(vector_db["zombie"])
-                
-                # Simulated Generation
-                if retrieved_chunks:
-                    response = "**Based on the retrieved literature:**\n\n"
-                    for chunk in retrieved_chunks:
-                        response += f"According to *{chunk['citation']}*: {chunk['text']}\n\n"
-                else:
-                    response = "I could not find any information regarding that in your curated literature database. Please try asking about 'pecking order', 'life stage', 'decline vs decay', or 'dynamic panels'."
-                
-                # Simulate the "typing" effect
-                full_response = ""
-                for chunk in response.split():
-                    full_response += chunk + " "
-                    time.sleep(0.05)
-                    message_placeholder.markdown(full_response + "▌")
-                
-                message_placeholder.markdown(full_response)
-                
-                # Show the exact source context
-                if retrieved_chunks:
-                    with st.expander("🔍 View Retrieved Source Documents"):
-                        for chunk in retrieved_chunks:
-                            st.info(f"**Source:** {chunk['citation']}\n\n**Exact Text:** {chunk['text']}")
+        if rag_output is None:
+            st.error(f"🚨 **Initialization Failed:** {status_msg}")
+        else:
+            st.success("✅ **AI Researcher is online and has indexed your literature!**")
+            lcel_chain, retriever = rag_output
 
-        # Add assistant response to chat history
-        st.session_state.messages.append({"role": "assistant", "content": full_response})
+            # --- 3. STREAMLIT CHAT UI ---
+            if "messages" not in st.session_state:
+                st.session_state.messages = [
+                    {"role": "assistant", "content": "Hello! I am your AI Literature Assistant. Click a suggested question below, or type your own specific query in the chat box to search your PDFs."}
+                ]
+
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+            # --- 4. EXPANDED PRE-DEFINED QUESTIONS GRID ---
+            st.write("") 
+            st.caption("💡 **Suggested Research Queries:**")
+            
+            active_prompt = None
+            
+            st.markdown("**1. Theoretical Foundations**")
+            col1, col2, col3 = st.columns(3)
+            if col1.button("Pecking Order vs Trade-Off?", width='stretch'):
+                active_prompt = "Compare the Pecking Order and Trade-Off theories based on the literature."
+            if col2.button("Role of asymmetric information?", width='stretch'):
+                active_prompt = "How does asymmetric information drive capital structure decisions?"
+            if col3.button("Agency costs of debt?", width='stretch'):
+                active_prompt = "Explain the agency costs associated with high debt levels."
+
+            st.markdown("**2. Corporate Life Stages**")
+            col4, col5, col6 = st.columns(3)
+            if col4.button("Define a 'Shakeout' firm?", width='stretch'):
+                active_prompt = "How does Dickinson (2011) classify a 'Shakeout' firm using cash flows?"
+            if col5.button("Why do 'Maturity' firms deleverage?", width='stretch'):
+                active_prompt = "Based on the literature, why do 'Maturity' firms deleverage so aggressively?"
+            if col6.button("Startup financing constraints?", width='stretch'):
+                active_prompt = "What are the unique external financing constraints faced by 'Startup' stage firms?"
+
+            st.markdown("**3. Methodology & Macro Policy**")
+            col7, col8, col9 = st.columns(3)
+            if col7.button("What is Nickell bias?", width='stretch'):
+                active_prompt = "Explain the Nickell bias in dynamic panel models and when it diminishes."
+            if col8.button("Macro risks of Zombie Firms?", width='stretch'):
+                active_prompt = "What are the macroeconomic and systemic risks of Zombie Firms?"
+            if col9.button("Impact of the IBC 2016?", width='stretch'):
+                active_prompt = "How does the implementation of the Insolvency and Bankruptcy Code (IBC) 2016 alter deleveraging behavior?"
+
+            # --- 5. CUSTOM CHAT INPUT ---
+            user_input = st.chat_input("Or type your own theoretical question here to search your PDFs...")
+            if user_input:
+                active_prompt = user_input
+
+            # --- 6. EXECUTE THE LCEL PIPELINE ---
+            if active_prompt:
+                st.session_state.messages.append({"role": "user", "content": active_prompt})
+                with st.chat_message("user"):
+                    st.markdown(active_prompt)
+
+                with st.chat_message("assistant"):
+                    with st.spinner("Scanning PDFs and synthesizing answer using Gemini..."):
+                        
+                        # Invoke the modern unified expression pipeline 
+                        answer = lcel_chain.invoke(active_prompt)
+                        
+                        # Explicitly invoke retriever separately to populate source expansions inside the UI
+                        source_documents = retriever.get_relevant_documents(active_prompt)
+
+                        st.markdown(answer)
+
+                        # Show the exact source context pulled from the PDFs
+                        if source_documents:
+                            with st.expander("🔍 View Source References from your PDFs"):
+                                for i, doc in enumerate(source_documents):
+                                    source_file = os.path.basename(doc.metadata.get('source', 'Unknown Document'))
+                                    st.info(f"**Source {i+1}:** {source_file}\n\n**Excerpt:** {doc.page_content}")
+
+                st.session_state.messages.append({"role": "assistant", "content": answer})
