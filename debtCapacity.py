@@ -675,7 +675,7 @@ elif analysis_type == "AI Research Assistant (RAG)":
                 retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
                 
                 # Create the LLM Model Brain
-                llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
+                llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
                 
                 # Setup Academic Prompt Engineering
                 system_prompt = (
@@ -775,7 +775,7 @@ elif analysis_type == "AI Research Assistant (RAG)":
                         answer = lcel_chain.invoke(active_prompt)
                         
                         # Explicitly invoke retriever separately to populate source expansions inside the UI
-                        source_documents = retriever.get_relevant_documents(active_prompt)
+                        source_documents = retriever.invoke(active_prompt)
 
                         st.markdown(answer)
 
